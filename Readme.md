@@ -223,6 +223,12 @@ python -m uwo_helper
 .\scripts\run.ps1
 ```
 
+双击或命令行运行 BAT：
+
+```powershell
+.\scripts\run.bat
+```
+
 截图会保存到：
 
 ```text
