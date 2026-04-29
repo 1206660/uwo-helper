@@ -1,0 +1,24 @@
+[project]
+name = "uwo-helper"
+version = "0.1.0"
+description = "Local screenshot, OCR review, and trade planning helper for UWO."
+requires-python = ">=3.10"
+dependencies = [
+    "PySide6>=6.7",
+]
+
+[project.optional-dependencies]
+ocr = [
+    "pillow>=10.0",
+    "pytesseract>=0.3.10",
+]
+
+[project.scripts]
+uwo-helper = "uwo_helper.__main__:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
