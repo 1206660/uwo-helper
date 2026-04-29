@@ -188,7 +188,13 @@ ocr_sessions(
 
 ## 推荐技术栈
 
-桌面端推荐：
+当前 MVP 使用 Python 标准库实现，不需要额外安装大型 GUI 依赖：
+
+- Tkinter：桌面界面
+- Windows RegisterHotKey：全局热键
+- Windows PowerShell + .NET：本机截图保存 PNG
+
+后续接 OCR 和更精致界面时推荐：
 
 - Python
 - PySide6
@@ -198,6 +204,44 @@ ocr_sessions(
 - openpyxl
 
 后续如果想要更轻的安装体验，也可以考虑 Tauri 或 Electron。但第一版用 Python 更容易把截图、OCR、SQLite 和表格导出串起来。
+
+## 本地运行
+
+当前版本依赖 Python 3.10+，第一版不需要安装 `requirements.txt` 里的第三方包。
+
+PowerShell 启动：
+
+```powershell
+cd E:\Home\uwo-helper
+$env:PYTHONPATH = "src"
+python -m uwo_helper
+```
+
+也可以运行脚本：
+
+```powershell
+.\scripts\run.ps1
+```
+
+截图会保存到：
+
+```text
+data/screenshots/
+```
+
+`data/` 是本地运行数据目录，已加入 `.gitignore`，不会提交到 git。
+
+## 当前已实现
+
+- 桌面主窗口。
+- 手动按钮截图。
+- `Ctrl+Alt+O` 全局热键截图。
+- 如果全局热键注册失败，降级为窗口内 `Ctrl+Alt+O`。
+- 截图自动保存为 PNG。
+- 截图列表和预览。
+- OCR 校对表格占位。
+
+注意：如果游戏以管理员权限运行，而 UWO Helper 不是管理员权限，系统可能不把全局热键事件交给辅助程序。这种情况下可以用按钮截图，或用相同权限启动 UWO Helper。
 
 ## 阶段计划
 
