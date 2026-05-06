@@ -107,6 +107,8 @@ def _numeric_or_text(value: str) -> object:
 
 def _format_age(delta) -> str:
     secs = int(delta.total_seconds())
+    if secs < 0:
+        return "未来"
     if secs < 60:
         return f"{secs}s"
     if secs < 3600:
