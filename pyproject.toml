@@ -1,19 +1,26 @@
 [project]
 name = "uwo-helper"
 version = "0.1.0"
-description = "Local screenshot, OCR review, and trade planning helper for UWO."
+description = "Local trade-route recommender and (later) automation helper for UWO."
 requires-python = ">=3.10"
 dependencies = [
+    "PySide6>=6.6,<7",
 ]
 
 [project.optional-dependencies]
-ocr = []
+dev = ["pytest>=8.0"]
+spike = ["pywin32>=306"]
+ocr = ["paddlepaddle>=2.6", "paddleocr>=2.7", "mss>=9.0"]
 
 [project.scripts]
-uwo-helper = "uwo_helper.__main__:main"
+uwo-helper = "uwo_helper.app:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
