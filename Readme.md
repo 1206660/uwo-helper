@@ -1,315 +1,61 @@
 # UWO Helper
 
-UWO Helper 是一个本地航海资料与收益计算工具，用来辅助记录港口价格、船厂售卖物、航线时间和任务收益。它只处理本机屏幕截图、手动录入和本地数据库，不连接游戏服务器，不读取游戏进程内存，也不自动操作游戏客户端。
+UWO Helper 是 UWO 中文私服的本地跑商辅助工具：手动 / OCR 录入价格观察 → SQLite → 单件利润最大的路线推荐。后续里程碑会加入截图 OCR 半自动录入和可独立测试的输入原语库。
 
-## 适用方式
+## 当前能力（M1 已交付）
 
-你正常开着游戏，再打开 UWO Helper。程序可以通过手动录入、导入截图，或本地屏幕截图 + OCR 的方式，把你在游戏界面上看到的信息整理进本地数据库。
+- PySide6 桌面主界面：工作台 / 价格簿 / 推荐路线 三页
+- 价格簿手录：港口、商品、买价、卖价、库存、备注 → SQLite
+- 推荐路线：按数据有效期、最少利润、Top N 过滤；按单件利润排序
+- 工作台：观察总数、最近观察时间、Top 3 推荐预览
+- SQLite 自动迁移、append-only 价格历史
 
-推荐日常流程：
+## 风险声明
 
-1. 在游戏里打开交易所、船厂或任务界面。
-2. 在 UWO Helper 里点击截图，或按一个全局热键截图。
-3. 程序识别当前截图中的商品名、价格、库存、港口名等文本。
-4. 你在校对界面确认识别结果。
-5. 确认后写入本地 SQLite 数据库。
-6. 程序根据数据库计算利润、推荐航线、生成采购清单或导出表格。
+本工具会在后续里程碑（M3）提供"模拟点击 / 模拟键盘"原语并允许投递到任意窗口（包括游戏客户端）。
 
-## 自动截图和 OCR
+- 自动化操作可能违反游戏运营方的用户协议，并存在被检测、封号的风险
+- 输入原语层会与"游戏业务逻辑"在代码层面隔离（`ui/pages/input_debug.py` 不得 `import core`），调试面板仅用于功能验证
+- 工具不会读取或修改游戏进程内存、不抓包、不修改游戏文件
+- 使用本工具的责任由用户自行承担
 
-可以做自动截图和 OCR，但建议设计成半自动，保留确认步骤。
+## 安装与运行
 
-支持的模式：
-
-- 手动截图：点击按钮后截取当前屏幕或指定窗口区域。
-- 热键截图：例如 `Ctrl+Alt+O` 截取预设区域并进入 OCR 校对。
-- 定时观察：每隔几秒检测一次指定区域是否有明显画面变化，变化后提示你确认是否识别。
-- 模板区域：针对交易所、船厂、任务界面保存不同截图区域，减少每次框选。
-
-不建议第一版直接全自动入库。OCR 会受到字体、背景、分辨率、遮挡和相似汉字影响，最好先显示识别结果，由你确认后再保存。
-
-安全边界：
-
-- 不连接游戏服务器。
-- 不模拟登录、交易、航行或任务请求。
-- 不抓包、不还原协议。
-- 不读取或修改游戏进程内存。
-- 不自动点击游戏窗口。
-- 不修改游戏文件。
-
-这个工具的定位是本地笔记本、OCR 录入器和收益计算器。
-
-## 主要模块
-
-### 工作台
-
-工作台展示当前港口、目标港口、可用货舱、最近录入价格、推荐贸易路线和当前收益估算。
-
-核心结果：
-
-- 单件利润
-- 总利润
-- 补给成本
-- 税费
-- 净利润
-- 单位时间收益
-
-### 价格簿
-
-记录交易所商品价格。
-
-建议字段：
-
-```sql
-price_observations(
-  id,
-  port_id,
-  good_id,
-  buy_price,
-  sell_price,
-  stock,
-  observed_at,
-  source,
-  note
-)
-```
-
-### 船厂库
-
-记录各港口船厂售卖的船只、部件、材料和价格。
-
-建议字段：
-
-```sql
-shipyard_items(
-  id,
-  port_id,
-  item_name,
-  category,
-  price,
-  stock,
-  refresh_note,
-  effect_note,
-  observed_at,
-  is_favorite,
-  note
-)
-```
-
-典型用途：
-
-- 查询某个港口船厂卖什么。
-- 查询某个部件在哪些港口出现。
-- 对比不同港口价格。
-- 维护采购清单。
-- 标记常用升级材料。
-
-### OCR 校对
-
-OCR 识别截图后，不直接写入数据库，而是进入校对界面。
-
-校对界面需要显示：
-
-- 原始截图区域
-- 识别出的文本
-- 识别置信度
-- 商品或物品匹配结果
-- 可编辑的价格、库存、港口字段
-- 确认入库按钮
-
-### 航线收益
-
-根据价格簿、船只容量、航行时间和成本计算路线收益。
-
-基础公式：
-
-```text
-单件利润 = 目标港卖价 - 当前港买价
-毛利润 = 单件利润 * 可装载数量
-净利润 = 毛利润 - 补给成本 - 税费 - 其他成本
-单位时间收益 = 净利润 / 预计航行分钟
-```
-
-### 导入导出
-
-第一版至少支持：
-
-- CSV 导入价格记录
-- CSV 导出价格簿
-- Excel 导出航线收益表
-- 数据库备份
-
-## 数据库草案
-
-```sql
-ports(
-  id,
-  name,
-  region,
-  note
-)
-
-goods(
-  id,
-  name,
-  category,
-  note
-)
-
-routes(
-  id,
-  from_port_id,
-  to_port_id,
-  estimated_minutes,
-  distance_note,
-  note
-)
-
-ships(
-  id,
-  name,
-  cargo_capacity,
-  speed,
-  supply_cost_per_minute,
-  tax_rate,
-  note
-)
-
-ocr_sessions(
-  id,
-  screen_type,
-  image_path,
-  raw_text,
-  reviewed,
-  created_at,
-  note
-)
-```
-
-## 推荐技术栈
-
-当前 MVP 使用 Python 标准库实现，不需要额外安装大型 GUI 依赖：
-
-- Tkinter：桌面界面
-- Windows RegisterHotKey：全局热键
-- Windows PowerShell + .NET：本机截图保存 PNG
-
-后续接 OCR 和更精致界面时推荐：
-
-- Python
-- PySide6
-- SQLite
-- PaddleOCR 或 Tesseract OCR
-- pandas
-- openpyxl
-
-后续如果想要更轻的安装体验，也可以考虑 Tauri 或 Electron。但第一版用 Python 更容易把截图、OCR、SQLite 和表格导出串起来。
-
-## 本地运行
-
-当前版本依赖 Python 3.10+，第一版不需要安装 `requirements.txt` 里的第三方包。
-
-PowerShell 启动：
+需要 Python 3.10+。
 
 ```powershell
 cd E:\Home\uwo-helper
-$env:PYTHONPATH = "src"
+pip install -e ".[dev]"
 python -m uwo_helper
 ```
 
-也可以运行脚本：
+数据库默认放在 `data/uwo_helper.sqlite3`。`data/` 已在 `.gitignore`。
+
+## 模块结构
+
+```
+src/uwo_helper/
+├── core/         # 纯业务: db, models, recommend, parse(M2)
+├── infra/        # M2/M3 引入: screenshot, ocr_engine, input_lib, window
+├── ui/           # PySide6
+└── app.py        # 入口
+```
+
+详细设计：`docs/superpowers/specs/2026-05-06-uwo-trade-bot-design.md`。
+
+## 里程碑
+
+| 里程碑 | 范围 | 状态 |
+|---|---|---|
+| M0 | PostMessage 可行性 spike | 已完成（见 `docs/superpowers/specs/2026-05-06-uwo-trade-bot-postmessage-spike.md`） |
+| M1 | PySide6 + SQLite + 手录 + 推荐 | 已完成 |
+| M2 | mss 截图 + PaddleOCR + 校对入库 | 待开始 |
+| M3 | input_lib 三种后端 + 调试面板 | 待开始（依赖 M0 结果） |
+
+## 测试
 
 ```powershell
-.\scripts\run.ps1
+pytest -v
 ```
 
-双击或命令行运行 BAT：
-
-```powershell
-.\scripts\run.bat
-```
-
-截图会保存到：
-
-```text
-data/screenshots/
-```
-
-`data/` 是本地运行数据目录，已加入 `.gitignore`，不会提交到 git。
-
-## 当前已实现
-
-- 桌面主窗口。
-- 手动按钮截图。
-- `Ctrl+Alt+O` 全局热键截图。
-- 如果全局热键注册失败，降级为窗口内 `Ctrl+Alt+O`。
-- 截图自动保存为 PNG。
-- 截图列表和预览。
-- OCR 校对表格占位。
-
-注意：如果游戏以管理员权限运行，而 UWO Helper 不是管理员权限，系统可能不把全局热键事件交给辅助程序。这种情况下可以用按钮截图，或用相同权限启动 UWO Helper。
-
-## 阶段计划
-
-### Milestone 1: 本地资料库
-
-- 建立 SQLite 数据库。
-- 港口、商品、船厂物品基础表。
-- 手动录入价格和船厂物品。
-- 表格查询、筛选、收藏。
-
-### Milestone 2: 收益计算
-
-- 航线时间录入。
-- 船只容量和成本配置。
-- 贸易路线收益排序。
-- 船厂采购清单。
-
-### Milestone 3: 截图 OCR
-
-- 手动截图。
-- 交易所区域模板。
-- 船厂区域模板。
-- OCR 识别结果校对。
-- 确认后入库。
-
-### Milestone 4: 使用体验
-
-- 全局热键截图。
-- 数据备份与恢复。
-- Excel 导出。
-- 常用港口和常用商品快捷筛选。
-
-## 当前界面原型
-
-已有桌面界面原型方向：
-
-- Claude 风格的暖白工作台。
-- 左侧导航。
-- 中间价格、OCR、船厂库、航线视图。
-- 右侧固定收益计算和推荐路线。
-
-原型可以继续作为 PySide6 界面布局参考。
-
-## 使用示例
-
-交易所录入：
-
-1. 游戏停在交易所界面。
-2. 按热键截图。
-3. UWO Helper 打开 OCR 校对页。
-4. 修正识别错误。
-5. 点击确认入库。
-6. 工作台刷新推荐贸易路线。
-
-船厂录入：
-
-1. 游戏停在船厂商店界面。
-2. 使用船厂 OCR 模板截图。
-3. 校对物品名、类别、价格和库存。
-4. 确认入库。
-5. 在船厂库中搜索部件或生成采购清单。
-
-## 项目原则
-
-这个项目只做本地可见信息的整理和计算。它应该像一本更聪明的航海笔记，而不是替代游戏客户端。
+仅核心层（`core/db`, `core/recommend`）有单测；UI 与平台相关代码靠手测。
