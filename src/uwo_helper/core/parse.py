@@ -1,10 +1,20 @@
+"""OCR -> ParsedScreen.
+
+Tuned for UWO Chinese private-server trade UI: a 3×3 grid of cards where each
+card has the good name on top and the price ~130-180 pixels below in the same
+column. Older "name + price + stock on the same row" layouts also work because
+the pairing scorer accepts both orientations.
+
+The parser is intentionally heuristic. OCR mis-reads + the review dialog mean
+small mistakes are recoverable; the goal is to extract enough that the user
+can confirm rather than re-type.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Literal
 
 from ..infra.ocr_engine import OcrLine
-
 
 Direction = Literal["buy", "sell", "unknown"]
 
@@ -15,7 +25,7 @@ class ParsedRow:
     raw_good_name: str
     buy_price: int | None
     sell_price: int | None
-    stock: int | None
+    stock: int | None  # currently always None; reserved for future use
     confidence: float
     raw_bbox: tuple[int, int, int, int]
 
@@ -31,7 +41,26 @@ class ParsedScreen:
 PORT_PREFIXES = ("当前港口", "所在港", "港口")
 BUY_KEYWORDS = ("购买", "买入")
 SELL_KEYWORDS = ("出售", "卖出")
-Y_CLUSTER_TOLERANCE = 15
+
+# Strings that look like Chinese names but are UI chrome / category labels.
+# Centralised here because the same string can appear at multiple zoom levels
+# in a UWO trade screen.
+NAME_BLACKLIST: frozenset[str] = frozenset({
+    # actions / buttons
+    "购买", "出售", "买入", "卖出", "确认", "取消", "返回", "搜索", "刷新",
+    "应用装载率", "超载出售", "出售补给品", "一键添加", "出售补给",
+    # state / labels
+    "交易", "交易信息", "交易分数", "交易商品购买价格折扣",
+    "货舱", "成功率", "关税", "语言效果", "协商触发概率",
+    "购买价格", "出售价格", "单价", "库存", "数量", "价格",
+    # UWO category labels (do NOT include strings like "香料"/"矿物"/"织物"/
+    # "武器"/"贵金属" — UWO uses those as both category headers AND product
+    # family names; the goods themselves are ambiguous. We only blacklist
+    # category strings that are unambiguously *not* a tradeable good.)
+    "工艺品", "食品原料", "调味料", "嗜好品", "杂货", "其他", "特产",
+    # navigation
+    "+出售", "+购买",
+})
 
 
 def parse_exchange_screen(
@@ -46,8 +75,31 @@ def parse_exchange_screen(
 
     port_name, raw_port_name = _detect_port(lines, known_ports)
     direction = _detect_direction(lines)
-    clusters = _cluster_by_y(lines)
-    rows = _extract_rows(clusters, direction, known_goods)
+
+    name_lines = [l for l in lines if _is_name_candidate(l.text)]
+    price_lines = [l for l in lines if _is_price_candidate(l.text)]
+
+    used_price_ids: set[int] = set()
+    rows: list[ParsedRow] = []
+    for name in name_lines:
+        match = _best_price_for(name, price_lines, used_price_ids)
+        if match is None:
+            continue
+        used_price_ids.add(id(match))
+        price_int = _parse_int(match.text)
+        good_match = next((g for g in known_goods if g == name.text), None)
+        rows.append(
+            ParsedRow(
+                good_name=good_match,
+                raw_good_name=name.text,
+                buy_price=price_int if direction == "buy" else None,
+                sell_price=price_int if direction == "sell" else None,
+                stock=None,
+                confidence=name.confidence,
+                raw_bbox=name.bbox,
+            )
+        )
+
     return ParsedScreen(
         port_name=port_name,
         raw_port_name=raw_port_name,
@@ -56,13 +108,14 @@ def parse_exchange_screen(
     )
 
 
+# ---- detection helpers ----
+
 def _detect_port(
     lines: list[OcrLine], known_ports: list[str]
 ) -> tuple[str | None, str]:
     for line in lines:
         for prefix in PORT_PREFIXES:
             if prefix in line.text:
-                # Strip prefix and any colon/punctuation
                 tail = line.text.split(prefix, 1)[1]
                 tail = tail.lstrip("：:·· ").strip()
                 if not tail:
@@ -73,111 +126,108 @@ def _detect_port(
 
 
 def _detect_direction(lines: list[OcrLine]) -> Direction:
+    """Pick the buy/sell keyword nearest the top of the screen.
+
+    UWO trade UI shows both "购买" (top tab title) and "+出售" (left sidebar
+    cross-link) at the same time; the topmost wins because that's the active
+    tab title.
+    """
+    top_buy_y: float = float("inf")
+    top_sell_y: float = float("inf")
     for line in lines:
+        y = line.bbox[1]
         if any(kw in line.text for kw in BUY_KEYWORDS):
-            return "buy"
+            top_buy_y = min(top_buy_y, y)
         if any(kw in line.text for kw in SELL_KEYWORDS):
-            return "sell"
-    return "unknown"
+            top_sell_y = min(top_sell_y, y)
+    if top_buy_y == float("inf") and top_sell_y == float("inf"):
+        return "unknown"
+    return "buy" if top_buy_y <= top_sell_y else "sell"
 
 
-def _cluster_by_y(lines: list[OcrLine]) -> list[list[OcrLine]]:
-    """Group lines whose y_center is within Y_CLUSTER_TOLERANCE of each other."""
-    if not lines:
-        return []
-    indexed = sorted(lines, key=lambda l: (l.bbox[1] + l.bbox[3]) / 2)
-    clusters: list[list[OcrLine]] = []
-    current: list[OcrLine] = [indexed[0]]
-    current_y = (indexed[0].bbox[1] + indexed[0].bbox[3]) / 2
-    for line in indexed[1:]:
-        y = (line.bbox[1] + line.bbox[3]) / 2
-        if abs(y - current_y) <= Y_CLUSTER_TOLERANCE:
-            current.append(line)
-        else:
-            clusters.append(current)
-            current = [line]
-            current_y = y
-    clusters.append(current)
-    return clusters
+# ---- candidate filters ----
+
+_BAD_NAME_CHARS = set("%／/，,。、.:：;>< ()（）+-=*&^$#@!?？！[]【】{}「」『』〈〉|\\\"'`~")
 
 
-def _extract_rows(
-    clusters: list[list[OcrLine]],
-    direction: Direction,
-    known_goods: list[str],
-) -> list[ParsedRow]:
-    rows: list[ParsedRow] = []
-    for cluster in clusters:
-        # Skip clusters that are obviously headers / labels (no numbers and no candidate good)
-        good_match: tuple[str, OcrLine] | None = None
-        raw_good_line: OcrLine | None = None
-        numbers: list[OcrLine] = []
-        for line in cluster:
-            if good_match is None:
-                hit = next((g for g in known_goods if g == line.text), None)
-                if hit is not None:
-                    good_match = (hit, line)
-                    raw_good_line = line
-                    continue
-            if _is_numeric(line.text):
-                numbers.append(line)
-            elif raw_good_line is None and not _is_numeric(line.text):
-                # Possible unknown good name (longest non-numeric, non-keyword token wins)
-                if _looks_like_good_name(line.text):
-                    raw_good_line = line
-
-        if raw_good_line is None:
-            continue  # not a data row
-
-        # Sort numbers left-to-right so price comes before stock
-        numbers.sort(key=lambda l: l.bbox[0])
-        price_int = _to_int(numbers[0].text) if numbers else None
-        stock_int = _to_int(numbers[1].text) if len(numbers) >= 2 else None
-
-        buy_price = price_int if direction == "buy" else None
-        sell_price = price_int if direction == "sell" else None
-
-        good_name = good_match[0] if good_match else None
-        rows.append(
-            ParsedRow(
-                good_name=good_name,
-                raw_good_name=raw_good_line.text,
-                buy_price=buy_price,
-                sell_price=sell_price,
-                stock=stock_int,
-                confidence=raw_good_line.confidence,
-                raw_bbox=raw_good_line.bbox,
-            )
-        )
-    return rows
-
-
-def _is_numeric(text: str) -> bool:
-    cleaned = text.replace(",", "").strip()
-    if not cleaned:
+def _is_name_candidate(text: str) -> bool:
+    text = text.strip()
+    if not (2 <= len(text) <= 8):
         return False
-    return cleaned.isdigit() or (cleaned.startswith("-") and cleaned[1:].isdigit())
-
-
-def _to_int(text: str) -> int | None:
-    cleaned = text.replace(",", "").strip()
-    try:
-        return int(cleaned)
-    except ValueError:
-        return None
-
-
-def _looks_like_good_name(text: str) -> bool:
-    """Plausible OCR result for an unknown trade good: not numeric, not a known keyword."""
-    if _is_numeric(text):
+    if text in NAME_BLACKLIST:
         return False
-    exact_keywords = PORT_PREFIXES + BUY_KEYWORDS + SELL_KEYWORDS + ("商品", "单价", "库存", "价格")
-    if text in exact_keywords:
+    if text.endswith("类"):  # 枪炮类, 织物类...
         return False
-    # Also reject if text starts with a port prefix (port header lines)
-    if any(text.startswith(p) for p in PORT_PREFIXES):
+    if any(ch.isdigit() for ch in text):
         return False
-    # Reject pure ASCII (likely UI chrome). UWO trade goods are CJK.
-    if text.isascii():
+    if any(ch in _BAD_NAME_CHARS for ch in text):
+        return False
+    if not any("一" <= ch <= "鿿" for ch in text):
         return False
     return True
+
+
+def _is_price_candidate(text: str) -> bool:
+    n = _parse_int(text)
+    if n is None:
+        return False
+    return 1 <= n <= 999_999_999
+
+
+def _parse_int(text: str) -> int | None:
+    cleaned = text.replace(",", "").replace("，", "").strip()
+    if not cleaned:
+        return None
+    if cleaned.endswith("%") or cleaned.endswith("％"):
+        return None
+    if cleaned.startswith("-"):
+        return None
+    if not cleaned.isdigit():
+        return None
+    return int(cleaned)
+
+
+# ---- pairing ----
+
+CARD_PRICE_DY_TARGET = 140
+"""Empirically: in UWO 3×3 card grid, price is ~140 px below the name.
+
+Stock/quantity numbers tend to land at ~60-90 px below the name (between the
+name and the price). We bias scoring toward dy ≈ 140 so the parser prefers
+the price line over the stock line when both fall inside the card.
+"""
+
+
+def _best_price_for(
+    name: OcrLine, prices: list[OcrLine], used: set[int]
+) -> OcrLine | None:
+    """Lowest-score price line near the name. Lower score = better match.
+
+    Two layouts coexist:
+    - same-row: |dy| < 25 (linear "name price" lists). Score by |dy| + |dx|.
+    - card-grid below: dy in [60, 230]. Score by |dy - 140| + |dx| so the
+      bottom-of-card price beats the upper "stock" numeric.
+    """
+    nx = (name.bbox[0] + name.bbox[2]) / 2
+    ny = (name.bbox[1] + name.bbox[3]) / 2
+    best: OcrLine | None = None
+    best_score = float("inf")
+    for p in prices:
+        if id(p) in used:
+            continue
+        px = (p.bbox[0] + p.bbox[2]) / 2
+        py = (p.bbox[1] + p.bbox[3]) / 2
+        dx = px - nx
+        dy = py - ny
+        if abs(dx) > 200:
+            continue
+        if abs(dy) < 25:
+            score = abs(dy) + abs(dx) * 0.4
+        elif 60 <= dy <= 230:
+            score = abs(dy - CARD_PRICE_DY_TARGET) + abs(dx) * 0.4
+        else:
+            continue
+        if score < best_score:
+            best_score = score
+            best = p
+    return best

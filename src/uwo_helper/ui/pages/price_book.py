@@ -95,6 +95,14 @@ class PriceBookPage(QWidget):
         self._settings = settings.load()
 
         # ---- form ----
+        # Persistent "current port" — UWO trade screen never shows the port
+        # name, so the user sets it once per port visit and it auto-fills in
+        # the OCR review dialog.
+        self._current_port = QComboBox()
+        self._current_port.setEditable(True)
+        self._current_port.setMinimumWidth(360)
+        self._current_port.editTextChanged.connect(self._on_current_port_changed)
+
         self._target = QComboBox()
         self._target.setMinimumWidth(360)
         self._refresh_target_button = QPushButton("刷新窗口列表")
@@ -121,6 +129,7 @@ class PriceBookPage(QWidget):
 
         form_box = QGroupBox("录入价格观察")
         form = QFormLayout(form_box)
+        form.addRow("当前港口", self._current_port)
         form.addRow("截图目标", target_row_widget)
         form.addRow("港口", self._port)
         form.addRow("商品", self._good)
@@ -156,7 +165,21 @@ class PriceBookPage(QWidget):
         self.refresh()
 
     def refresh(self) -> None:
-        self._port.set_items([p.name for p in self._db.list_ports()])
+        port_names = [p.name for p in self._db.list_ports()]
+        # Refill "current port" combo while keeping any typed value
+        current = self._current_port.currentText()
+        self._current_port.blockSignals(True)
+        self._current_port.clear()
+        self._current_port.addItems(port_names)
+        if current:
+            self._current_port.setEditText(current)
+        else:
+            saved = self._settings.get("current_port") or ""
+            if saved:
+                self._current_port.setEditText(saved)
+        self._current_port.blockSignals(False)
+
+        self._port.set_items(port_names)
         self._good.set_items([g.name for g in self._db.list_goods()])
         rows = self._db.list_observations(limit=200)
         self._table.setRowCount(len(rows))
@@ -262,6 +285,10 @@ class PriceBookPage(QWidget):
             }
         settings.save(self._settings)
 
+    def _on_current_port_changed(self, text: str) -> None:
+        self._settings["current_port"] = text.strip()
+        settings.save(self._settings)
+
     def _target_selection_token(self):
         data = self._target.currentData()
         if data == PRIMARY_SCREEN_KEY:
@@ -333,8 +360,16 @@ class PriceBookPage(QWidget):
             self._progress = None
         known_ports = {p.name for p in self._db.list_ports()}
         known_goods = {g.name for g in self._db.list_goods()}
+        # Pre-fill port using the page-level "当前港口" if the parser couldn't
+        # extract one from the screenshot (UWO trade UI has no port name).
+        default_port = self._current_port.currentText().strip()
         dlg = OcrReviewDialog(
-            parsed, screenshot_path, sorted(known_ports), sorted(known_goods), parent=self
+            parsed,
+            screenshot_path,
+            sorted(known_ports),
+            sorted(known_goods),
+            default_port=default_port,
+            parent=self,
         )
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return

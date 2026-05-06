@@ -49,6 +49,7 @@ class OcrReviewDialog(QDialog):
         screenshot_path: Path,
         known_ports: list[str],
         known_goods: list[str],
+        default_port: str = "",
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -73,10 +74,13 @@ class OcrReviewDialog(QDialog):
         self._port = QComboBox()
         self._port.setEditable(True)
         self._port.addItems(known_ports)
+        # Priority: parser hit > parser raw > caller default (e.g. price-book "当前港口")
         if parsed.port_name:
             self._port.setCurrentText(parsed.port_name)
         elif parsed.raw_port_name:
             self._port.setEditText(parsed.raw_port_name)
+        elif default_port:
+            self._port.setEditText(default_port)
 
         self._direction_buy = QRadioButton("买入")
         self._direction_sell = QRadioButton("卖出")

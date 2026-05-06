@@ -23,10 +23,8 @@ def test_parse_buy_screen_with_known_port_and_goods():
         line("购买", 20, 50, 60, 70),
         line("香料", 50, 100, 90, 120),
         line("320", 150, 100, 180, 120),
-        line("450", 220, 100, 250, 120),
         line("黄金", 50, 130, 90, 150),
         line("5000", 150, 130, 200, 150),
-        line("12", 220, 130, 240, 150),
     ]
     result = parse_exchange_screen(
         lines, known_goods=["香料", "黄金"], known_ports=["里斯本"]
@@ -37,10 +35,8 @@ def test_parse_buy_screen_with_known_port_and_goods():
     spice = next(r for r in result.rows if r.good_name == "香料")
     assert spice.buy_price == 320
     assert spice.sell_price is None
-    assert spice.stock == 450
     gold = next(r for r in result.rows if r.good_name == "黄金")
     assert gold.buy_price == 5000
-    assert gold.stock == 12
 
 
 def test_parse_sell_screen_routes_prices_to_sell_field():
@@ -49,7 +45,6 @@ def test_parse_sell_screen_routes_prices_to_sell_field():
         line("出售", 20, 50, 60, 70),
         line("香料", 50, 100, 90, 120),
         line("980", 150, 100, 180, 120),
-        line("0", 220, 100, 240, 120),
     ]
     result = parse_exchange_screen(
         lines, known_goods=["香料"], known_ports=["阿姆斯特丹"]
@@ -60,7 +55,6 @@ def test_parse_sell_screen_routes_prices_to_sell_field():
     assert row.good_name == "香料"
     assert row.buy_price is None
     assert row.sell_price == 980
-    assert row.stock == 0
 
 
 def test_parse_unknown_direction_leaves_prices_unassigned():
@@ -101,18 +95,18 @@ def test_parse_unknown_good_keeps_raw_name():
     assert row.buy_price == 999
 
 
-def test_parse_y_clusters_rows_independently():
-    """Two goods on different y bands must not bleed into each other's row."""
+def test_parse_card_grid_pairs_each_name_with_price_below():
+    """UWO card-grid layout: each card has the name on top and the price ~140
+    pixels below in the same column. The parser must pair them within a card
+    and not steal across cards."""
     lines = [
-        line("购买", 20, 50, 60, 70),
-        # row 1, y around 100
+        line("购买", 20, 10, 60, 30),  # top tab title -> direction = buy
+        # Column 1, card 1: name at (50,100), price at (60,250)
         line("香料", 50, 100, 90, 120),
-        line("320", 150, 100, 180, 120),
-        line("450", 220, 100, 250, 120),
-        # row 2, y around 200 (well separated)
-        line("黄金", 50, 200, 90, 220),
-        line("5000", 150, 200, 200, 220),
-        line("12", 220, 200, 240, 220),
+        line("320", 60, 250, 110, 270),
+        # Column 1, card 2: name at (50,400), price at (60,550)
+        line("黄金", 50, 400, 90, 420),
+        line("5000", 60, 550, 130, 570),
     ]
     result = parse_exchange_screen(
         lines, known_goods=["香料", "黄金"], known_ports=[]
@@ -120,6 +114,6 @@ def test_parse_y_clusters_rows_independently():
     assert len(result.rows) == 2
     spice = next(r for r in result.rows if r.good_name == "香料")
     gold = next(r for r in result.rows if r.good_name == "黄金")
-    # Make sure prices didn't swap across rows
-    assert spice.buy_price == 320 and spice.stock == 450
-    assert gold.buy_price == 5000 and gold.stock == 12
+    # Make sure card boundaries weren't crossed
+    assert spice.buy_price == 320
+    assert gold.buy_price == 5000
