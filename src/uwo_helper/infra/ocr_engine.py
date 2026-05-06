@@ -40,7 +40,10 @@ class PaddleOcrEngine:
                 "paddleocr is not installed. Install with: pip install -e \".[ocr]\""
             ) from exc
         try:
-            self._engine = PaddleOCR(use_angle_cls=False, lang=self._lang, show_log=False)
+            # PaddleOCR 3.x dropped show_log/use_angle_cls; only lang is kept.
+            # enable_mkldnn=False works around a oneDNN PIR-attribute bug seen in 3.5
+            # on Windows ("ConvertPirAttribute2RuntimeAttribute not support" at inference time).
+            self._engine = PaddleOCR(lang=self._lang, enable_mkldnn=False)
         except Exception as exc:
             raise OcrError(f"PaddleOCR init failed: {exc}") from exc
         log.info("PaddleOCR loaded (lang=%s)", self._lang)
@@ -51,27 +54,24 @@ class PaddleOcrEngine:
             raise OcrError(f"image not found: {image_path}")
         self._ensure_loaded()
         try:
-            raw = self._engine.ocr(str(image_path), cls=False)
+            raw = self._engine.predict(str(image_path))
         except Exception as exc:
             raise OcrError(f"OCR call failed: {exc}") from exc
 
-        # PaddleOCR's return shape varies by version. Normalize:
-        # 2.7+: [ [ [box, (text, conf)], ... ] ]   # one image per outer list
-        # older: [ [box, (text, conf)], ... ]
+        # PaddleOCR 3.x .predict() returns a list of dict-like result objects, one per
+        # input image. Each carries 'rec_polys' (list of 4-point boxes), 'rec_texts',
+        # and 'rec_scores' as parallel arrays.
         if not raw:
             return []
-        page = raw[0] if isinstance(raw[0], list) and raw[0] and isinstance(raw[0][0], list) else raw
+        page = raw[0]
+        polys = page.get("rec_polys") or []
+        texts = page.get("rec_texts") or []
+        scores = page.get("rec_scores") or []
 
         result: list[OcrLine] = []
-        for item in page:
-            if not isinstance(item, list) or len(item) != 2:
-                continue
-            box, payload = item
-            if not isinstance(payload, (list, tuple)) or len(payload) != 2:
-                continue
-            text, confidence = payload
+        for box, text, conf in zip(polys, texts, scores):
             xs = [int(p[0]) for p in box]
             ys = [int(p[1]) for p in box]
             bbox = (min(xs), min(ys), max(xs), max(ys))
-            result.append(OcrLine(text=str(text), bbox=bbox, confidence=float(confidence)))
+            result.append(OcrLine(text=str(text), bbox=bbox, confidence=float(conf)))
         return result
