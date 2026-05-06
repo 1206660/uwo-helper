@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QListWidget,
@@ -38,7 +39,6 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._price_book)
         self._stack.addWidget(self._recommend)
 
-        # Cross-page wiring: when an observation is added, refresh the recommend page.
         self._price_book.observation_added.connect(self._on_observation_added)
 
         layout = QHBoxLayout()
@@ -49,11 +49,15 @@ class MainWindow(QMainWindow):
         container.setLayout(layout)
         self.setCentralWidget(container)
 
+        # Application-wide shortcut: Ctrl+Alt+O triggers capture from any page
+        capture_shortcut = QShortcut(QKeySequence("Ctrl+Alt+O"), self)
+        capture_shortcut.activated.connect(self._on_capture_shortcut)
+
         self._nav.setCurrentRow(0)
 
     def _switch_page(self, row: int) -> None:
         self._stack.setCurrentIndex(row)
-        if row == 2:  # recommend page; refresh on entry
+        if row == 2:
             self._recommend.refresh()
         elif row == 1:
             self._price_book.refresh()
@@ -63,3 +67,8 @@ class MainWindow(QMainWindow):
     def _on_observation_added(self) -> None:
         self._recommend.refresh()
         self._workbench.refresh()
+
+    def _on_capture_shortcut(self) -> None:
+        # Switch to price-book page (so the user sees the table refresh) then trigger capture.
+        self._nav.setCurrentRow(1)
+        self._price_book._on_capture()  # noqa: SLF001 — controlled internal call
