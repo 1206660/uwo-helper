@@ -50,8 +50,8 @@ def main() -> int:
 
     window = MainWindow(db)
     assert window.windowTitle() == "UWO Helper"
-    assert window._nav.count() == 3
-    assert window._stack.count() == 3
+    assert window._nav.count() == 4
+    assert window._stack.count() == 4
 
     window._workbench.refresh()
     wb = window._workbench
