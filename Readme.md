@@ -1,8 +1,8 @@
 # UWO Helper
 
-UWO Helper 是 UWO 中文私服的本地跑商辅助工具：手动 / OCR 录入价格观察 → SQLite → 单件利润最大的路线推荐。后续里程碑会加入可独立测试的输入原语库 (M3)。
+UWO Helper 是 UWO 中文私服的本地跑商辅助工具：手动 / OCR 录入价格观察 → SQLite → 单件利润最大的路线推荐 → 与游戏业务断开的输入原语库（M3 已就位，待 M4 串成自动化）。
 
-## 当前能力（M2 已交付）
+## 当前能力（M3 已交付）
 
 - PySide6 桌面主界面：工作台 / 价格簿 / 推荐路线 三页
 - 价格簿手录：港口、商品、买价、卖价、库存、备注 → SQLite
@@ -10,6 +10,8 @@ UWO Helper 是 UWO 中文私服的本地跑商辅助工具：手动 / OCR 录入
 - 工作台：观察总数、最近观察时间、Top 3 推荐预览
 - 截图录入：mss 截图 → PaddleOCR → 解析 → OCR 校对面板 → 入库（`source='ocr'`）
 - `Ctrl+Alt+O` 应用内热键触发截图录入（焦点在主窗口时生效；全局热键留待 M3）
+- 输入原语库 (`infra/input_backend.py`)：Loopback / PostMessage / SendInput 三种后端，运行时切换；与游戏业务逻辑硬隔离（`ui/pages/input_debug.py` 不准 `import core.{db,recommend,parse,models}`）
+- `Ctrl+Alt+P` 紧急停止：触发后所有进行中的输入循环立即中断
 - SQLite 自动迁移、append-only 价格历史
 
 ## 风险声明
@@ -52,7 +54,7 @@ src/uwo_helper/
 | M0 | PostMessage 可行性 spike | 已完成（见 `docs/superpowers/specs/2026-05-06-uwo-trade-bot-postmessage-spike.md`） |
 | M1 | PySide6 + SQLite + 手录 + 推荐 | 已完成 |
 | M2 | mss 截图 + PaddleOCR + 校对入库 | 已完成 |
-| M3 | input_lib 三种后端 + 调试面板 | 待开始（依赖 M0 结果） |
+| M3 | input_lib 三种后端 + 调试面板 | 已完成 |
 
 ## 测试
 
