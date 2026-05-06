@@ -40,3 +40,22 @@ def capture_region(left: int, top: int, right: int, bottom: int, out_path: Path)
         raise ScreenshotError(f"region capture failed: {exc}") from exc
     log.info("captured region %s -> %s", region, out_path)
     return out_path
+
+
+def capture_window(hwnd: int, out_path: Path) -> Path:
+    """Capture a target window's client area by its on-screen rect.
+
+    The window must not be minimized and should not be occluded by other windows
+    at capture time (caller is responsible for hiding the helper UI first).
+    """
+    from .window import WindowError, get_client_rect_screen, is_minimized, is_window
+
+    if not is_window(hwnd):
+        raise ScreenshotError(f"hwnd {hwnd} is not a valid window")
+    if is_minimized(hwnd):
+        raise ScreenshotError("目标窗口已最小化，请先还原")
+    try:
+        left, top, right, bottom = get_client_rect_screen(hwnd)
+    except WindowError as exc:
+        raise ScreenshotError(str(exc)) from exc
+    return capture_region(left, top, right, bottom, out_path)

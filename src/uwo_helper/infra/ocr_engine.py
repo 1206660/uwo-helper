@@ -43,10 +43,24 @@ class PaddleOcrEngine:
             # PaddleOCR 3.x dropped show_log/use_angle_cls; only lang is kept.
             # enable_mkldnn=False works around a oneDNN PIR-attribute bug seen in 3.5
             # on Windows ("ConvertPirAttribute2RuntimeAttribute not support" at inference time).
-            self._engine = PaddleOCR(lang=self._lang, enable_mkldnn=False)
+            #
+            # We tune for game-UI screenshots (not document scans):
+            # - mobile det/rec models: ~5-10x faster than server, accuracy still strong on
+            #   crisp UI fonts
+            # - skip doc orientation classify / unwarp / textline orientation: these target
+            #   scanned/photographed documents and add seconds for zero gain on game UI
+            self._engine = PaddleOCR(
+                lang=self._lang,
+                enable_mkldnn=False,
+                text_detection_model_name="PP-OCRv5_mobile_det",
+                text_recognition_model_name="PP-OCRv5_mobile_rec",
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+                use_textline_orientation=False,
+            )
         except Exception as exc:
             raise OcrError(f"PaddleOCR init failed: {exc}") from exc
-        log.info("PaddleOCR loaded (lang=%s)", self._lang)
+        log.info("PaddleOCR loaded (lang=%s, profile=mobile-fast)", self._lang)
 
     def recognize(self, image_path: Path) -> list[OcrLine]:
         """Run OCR on an image file. Raises OcrError on failure."""
