@@ -3,10 +3,12 @@ from __future__ import annotations
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QHBoxLayout,
+    QLabel,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
     QStackedWidget,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -23,12 +25,28 @@ class MainWindow(QMainWindow):
         self.resize(1280, 820)
         self._db = db
 
+        # Sidebar with brand header + nav list
+        brand = QLabel("UWO Helper")
+        brand.setObjectName("TitleLabel")
+        brand_subtitle = QLabel("航海本地助手")
+        brand_subtitle.setObjectName("SubtitleLabel")
+
         self._nav = QListWidget()
-        self._nav.setFixedWidth(220)
         self._nav.addItem(QListWidgetItem("工作台"))
         self._nav.addItem(QListWidgetItem("价格簿"))
         self._nav.addItem(QListWidgetItem("推荐路线"))
         self._nav.currentRowChanged.connect(self._switch_page)
+
+        sidebar_layout = QVBoxLayout()
+        sidebar_layout.setContentsMargins(18, 22, 8, 18)
+        sidebar_layout.setSpacing(4)
+        sidebar_layout.addWidget(brand)
+        sidebar_layout.addWidget(brand_subtitle)
+        sidebar_layout.addSpacing(20)
+        sidebar_layout.addWidget(self._nav, 1)
+        sidebar = QWidget()
+        sidebar.setFixedWidth(228)
+        sidebar.setLayout(sidebar_layout)
 
         self._stack = QStackedWidget()
         self._workbench = WorkbenchPage(db)
@@ -42,8 +60,9 @@ class MainWindow(QMainWindow):
         self._price_book.observation_added.connect(self._on_observation_added)
 
         layout = QHBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self._nav)
+        layout.setContentsMargins(0, 0, 18, 18)
+        layout.setSpacing(0)
+        layout.addWidget(sidebar)
         layout.addWidget(self._stack, 1)
         container = QWidget()
         container.setLayout(layout)

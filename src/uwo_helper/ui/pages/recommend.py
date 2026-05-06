@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
@@ -18,6 +19,9 @@ from PySide6.QtWidgets import (
 
 from ...core.db import Database
 from ...core.recommend import recommend
+
+
+PROFIT_GREEN = QColor("#7a8c2f")
 
 
 class RecommendPage(QWidget):
@@ -60,6 +64,8 @@ class RecommendPage(QWidget):
         self._table.setSortingEnabled(True)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 4, 4)
+        layout.setSpacing(14)
         layout.addWidget(filter_box)
         layout.addWidget(self._table, 1)
 
@@ -84,16 +90,23 @@ class RecommendPage(QWidget):
             cells = [
                 r.good.name,
                 r.buy_port.name,
-                str(r.buy_price),
+                f"{r.buy_price:,}",
                 r.sell_port.name,
-                str(r.sell_price),
-                str(r.profit_per_unit),
+                f"{r.sell_price:,}",
+                f"+{r.profit_per_unit:,}",
                 f"买 {buy_age} / 卖 {sell_age}",
             ]
             for col, value in enumerate(cells):
                 item = QTableWidgetItem(value)
                 if col in (2, 4, 5):
                     item.setData(Qt.DisplayRole, _numeric_or_text(value))
+                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                if col == 5:
+                    font = item.font()
+                    font.setBold(True)
+                    item.setFont(font)
+                    item.setForeground(PROFIT_GREEN)
+                    item.setData(Qt.DisplayRole, r.profit_per_unit)  # ensure numeric sort
                 self._table.setItem(i, col, item)
         self._table.setSortingEnabled(True)
 

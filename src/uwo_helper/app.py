@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .core.db import Database
 from .ui.main_window import MainWindow
+from .ui.theme import apply_theme
 
 
 DEFAULT_DB_PATH = Path("data") / "uwo_helper.sqlite3"
@@ -58,6 +59,7 @@ def main() -> int:
     log.info("uwo-helper start")
 
     app = QApplication([a for a in sys.argv if a != "--debug"])
+    apply_theme(app)
     db = Database.open(DEFAULT_DB_PATH)
     window = MainWindow(db)
     window.show()

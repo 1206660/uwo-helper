@@ -86,6 +86,7 @@ class PriceBookPage(QWidget):
         self._note = QLineEdit()
 
         self._submit = QPushButton("入库")
+        self._submit.setProperty("primary", True)
         self._submit.clicked.connect(self._on_submit)
         self._capture = QPushButton("截图录入")
         self._capture.clicked.connect(self._on_capture)
@@ -115,6 +116,8 @@ class PriceBookPage(QWidget):
         self._table.setEditTriggers(QTableWidget.NoEditTriggers)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 4, 4)
+        layout.setSpacing(14)
         layout.addWidget(form_box)
         layout.addWidget(self._table, 1)
 

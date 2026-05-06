@@ -54,9 +54,12 @@ def main() -> int:
     assert window._stack.count() == 3
 
     window._workbench.refresh()
-    summary = window._workbench._summary.text()
-    assert "港口: 2" in summary and "商品: 2" in summary and "观察: 4" in summary
-    assert window._workbench._top.rowCount() == 2
+    wb = window._workbench
+    assert wb._stat_ports.text() == "2"
+    assert wb._stat_goods.text() == "2"
+    assert wb._stat_obs.text() == "4"
+    assert wb._top.rowCount() == 2  # Top 5 capped by data, only 2 goods exist
+    assert wb._top_profit.text() == "+200"
 
     window._price_book.refresh()
     assert window._price_book._table.rowCount() == 4
