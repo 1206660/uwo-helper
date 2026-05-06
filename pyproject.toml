@@ -24,6 +24,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+addopts = "-m 'not manual'"
 markers = [
     "manual: tests that touch real OS resources; skipped in normal runs",
 ]
