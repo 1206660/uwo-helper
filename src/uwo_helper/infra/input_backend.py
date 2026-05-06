@@ -189,9 +189,99 @@ class LoopbackBackend:
         log.info("loopback hotkey %s -> vk=0x%02X mods=%d hwnd=%d", combo, vk, modifiers, hwnd)
 
 
+# ---- PostMessage backend ----
+
+import win32api  # type: ignore[import-not-found]
+import win32con  # type: ignore[import-not-found]
+import win32gui  # type: ignore[import-not-found]
+
+
+_VK_MOD_KEYS: dict[int, int] = {
+    MOD_CTRL: 0x11,   # VK_CONTROL
+    MOD_SHIFT: 0x10,  # VK_SHIFT
+    MOD_ALT: 0x12,    # VK_MENU
+    MOD_WIN: 0x5B,    # VK_LWIN
+}
+
+
+def _jitter_sleep(min_ms: int = 30, max_ms: int = 80) -> None:
+    time.sleep(random.uniform(min_ms / 1000, max_ms / 1000))
+
+
+class PostMessageBackend:
+    """Background WM_KEYDOWN / WM_LBUTTONDOWN injection via PostMessage.
+
+    Works for plain Win32 controls (Notepad, EDIT widgets). Most DirectX /
+    OpenGL games — including Unreal Engine's RawInput pipeline — drop these
+    messages on the floor. Verify against your target before relying on it.
+    """
+
+    name = "postmessage"
+
+    def click(self, hwnd: int, x: int, y: int, button: Literal["left", "right"] = "left") -> None:
+        if is_emergency_stopped():
+            return
+        if not win32gui.IsWindow(hwnd):
+            raise ValueError(f"hwnd {hwnd} is not a valid window")
+        lparam = (y << 16) | (x & 0xFFFF)
+        if button == "left":
+            down, up, btn_flag = win32con.WM_LBUTTONDOWN, win32con.WM_LBUTTONUP, win32con.MK_LBUTTON
+        else:
+            down, up, btn_flag = win32con.WM_RBUTTONDOWN, win32con.WM_RBUTTONUP, win32con.MK_RBUTTON
+        win32api.PostMessage(hwnd, down, btn_flag, lparam)
+        _jitter_sleep()
+        win32api.PostMessage(hwnd, up, 0, lparam)
+        log.info("postmessage click hwnd=%d %s @ %d,%d", hwnd, button, x, y)
+
+    def key_press(self, hwnd: int, vk: int, modifiers: int = 0) -> None:
+        if is_emergency_stopped():
+            return
+        if not win32gui.IsWindow(hwnd):
+            raise ValueError(f"hwnd {hwnd} is not a valid window")
+        # Press modifier keys first (in a stable order)
+        held: list[int] = []
+        for bit, mvk in _VK_MOD_KEYS.items():
+            if modifiers & bit:
+                win32api.PostMessage(hwnd, win32con.WM_KEYDOWN, mvk, 0)
+                held.append(mvk)
+                _jitter_sleep(10, 25)
+        win32api.PostMessage(hwnd, win32con.WM_KEYDOWN, vk, 0)
+        _jitter_sleep()
+        win32api.PostMessage(hwnd, win32con.WM_KEYUP, vk, 0xC0000001)
+        for mvk in reversed(held):
+            _jitter_sleep(10, 25)
+            win32api.PostMessage(hwnd, win32con.WM_KEYUP, mvk, 0xC0000001)
+        log.info("postmessage key vk=0x%02X mods=%d hwnd=%d", vk, modifiers, hwnd)
+
+    def type_text(self, hwnd: int, text: str) -> None:
+        if not win32gui.IsWindow(hwnd):
+            raise ValueError(f"hwnd {hwnd} is not a valid window")
+        for ch in text:
+            if is_emergency_stopped():
+                return
+            scan = win32api.VkKeyScan(ch)
+            if scan == -1:
+                log.warning("postmessage type: skipping unmappable char %r", ch)
+                continue
+            vk = scan & 0xFF
+            need_shift = bool(scan & 0x100)
+            mods = MOD_SHIFT if need_shift else 0
+            self.key_press(hwnd, vk, mods)
+            _jitter_sleep(20, 50)
+
+    def hotkey(self, hwnd: int, combo: str) -> None:
+        if is_emergency_stopped():
+            return
+        modifiers, vk = parse_hotkey(combo)
+        self.key_press(hwnd, vk, modifiers)
+
+
 # ---- factory (extended in later tasks to add PostMessage / SendInput) ----
 
-_REGISTRY: dict[str, type] = {"loopback": LoopbackBackend}
+_REGISTRY: dict[str, type] = {
+    "loopback": LoopbackBackend,
+    "postmessage": PostMessageBackend,
+}
 
 
 def get_backend(name: str) -> Backend:
