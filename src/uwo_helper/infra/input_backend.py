@@ -276,11 +276,171 @@ class PostMessageBackend:
         self.key_press(hwnd, vk, modifiers)
 
 
+# ---- SendInput backend ----
+
+import ctypes
+from ctypes import wintypes
+
+_INPUT_KEYBOARD = 1
+_INPUT_MOUSE = 0
+_KEYEVENTF_KEYUP = 0x0002
+_KEYEVENTF_SCANCODE = 0x0008
+_KEYEVENTF_UNICODE = 0x0004
+_MOUSEEVENTF_MOVE = 0x0001
+_MOUSEEVENTF_LEFTDOWN = 0x0002
+_MOUSEEVENTF_LEFTUP = 0x0004
+_MOUSEEVENTF_RIGHTDOWN = 0x0008
+_MOUSEEVENTF_RIGHTUP = 0x0010
+_MOUSEEVENTF_ABSOLUTE = 0x8000
+
+
+class _MOUSEINPUT(ctypes.Structure):
+    _fields_ = [
+        ("dx", wintypes.LONG),
+        ("dy", wintypes.LONG),
+        ("mouseData", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.POINTER(wintypes.ULONG)),
+    ]
+
+
+class _KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk", wintypes.WORD),
+        ("wScan", wintypes.WORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.POINTER(wintypes.ULONG)),
+    ]
+
+
+class _INPUT_UNION(ctypes.Union):
+    _fields_ = [("mi", _MOUSEINPUT), ("ki", _KEYBDINPUT)]
+
+
+class _INPUT(ctypes.Structure):
+    _anonymous_ = ("u",)
+    _fields_ = [("type", wintypes.DWORD), ("u", _INPUT_UNION)]
+
+
+_user32 = ctypes.windll.user32
+_SendInput = _user32.SendInput
+_SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(_INPUT), ctypes.c_int]
+_SendInput.restype = wintypes.UINT
+
+
+def _bring_to_front(hwnd: int) -> None:
+    if win32gui.IsIconic(hwnd):
+        win32gui.ShowWindow(hwnd, 9)  # SW_RESTORE
+    win32gui.SetForegroundWindow(hwnd)
+
+
+def _send_key_event(vk: int, key_up: bool) -> None:
+    flags = _KEYEVENTF_KEYUP if key_up else 0
+    inp = _INPUT(type=_INPUT_KEYBOARD)
+    inp.ki = _KEYBDINPUT(wVk=vk, wScan=0, dwFlags=flags, time=0, dwExtraInfo=None)
+    _SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
+
+
+def _send_mouse_event(dx: int, dy: int, flags: int) -> None:
+    inp = _INPUT(type=_INPUT_MOUSE)
+    inp.mi = _MOUSEINPUT(dx=dx, dy=dy, mouseData=0, dwFlags=flags, time=0, dwExtraInfo=None)
+    _SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
+
+
+class SendInputBackend:
+    """Foreground SendInput. Brings the target window to the front, then
+    synthesises real OS-level keyboard / mouse events. The user loses control
+    of keyboard and mouse for the duration of each call.
+    """
+
+    name = "sendinput"
+
+    def click(self, hwnd: int, x: int, y: int, button: Literal["left", "right"] = "left") -> None:
+        if is_emergency_stopped():
+            return
+        if not win32gui.IsWindow(hwnd):
+            raise ValueError(f"hwnd {hwnd} is not a valid window")
+        _bring_to_front(hwnd)
+        _jitter_sleep(80, 150)
+        sx, sy = win32gui.ClientToScreen(hwnd, (x, y))
+        # Convert to absolute coordinates for SendInput (0..65535)
+        screen_w = ctypes.windll.user32.GetSystemMetrics(0)
+        screen_h = ctypes.windll.user32.GetSystemMetrics(1)
+        ax = int(sx * 65535 / max(1, screen_w - 1))
+        ay = int(sy * 65535 / max(1, screen_h - 1))
+        _send_mouse_event(ax, ay, _MOUSEEVENTF_MOVE | _MOUSEEVENTF_ABSOLUTE)
+        _jitter_sleep()
+        if button == "left":
+            _send_mouse_event(0, 0, _MOUSEEVENTF_LEFTDOWN)
+            _jitter_sleep()
+            _send_mouse_event(0, 0, _MOUSEEVENTF_LEFTUP)
+        else:
+            _send_mouse_event(0, 0, _MOUSEEVENTF_RIGHTDOWN)
+            _jitter_sleep()
+            _send_mouse_event(0, 0, _MOUSEEVENTF_RIGHTUP)
+        log.info("sendinput click hwnd=%d %s @ %d,%d (screen %d,%d)", hwnd, button, x, y, sx, sy)
+
+    def key_press(self, hwnd: int, vk: int, modifiers: int = 0) -> None:
+        if is_emergency_stopped():
+            return
+        if not win32gui.IsWindow(hwnd):
+            raise ValueError(f"hwnd {hwnd} is not a valid window")
+        _bring_to_front(hwnd)
+        _jitter_sleep(80, 150)
+        held: list[int] = []
+        for bit, mvk in _VK_MOD_KEYS.items():
+            if modifiers & bit:
+                _send_key_event(mvk, key_up=False)
+                held.append(mvk)
+                _jitter_sleep(10, 25)
+        _send_key_event(vk, key_up=False)
+        _jitter_sleep()
+        _send_key_event(vk, key_up=True)
+        for mvk in reversed(held):
+            _jitter_sleep(10, 25)
+            _send_key_event(mvk, key_up=True)
+        log.info("sendinput key vk=0x%02X mods=%d hwnd=%d", vk, modifiers, hwnd)
+
+    def type_text(self, hwnd: int, text: str) -> None:
+        if not win32gui.IsWindow(hwnd):
+            raise ValueError(f"hwnd {hwnd} is not a valid window")
+        _bring_to_front(hwnd)
+        _jitter_sleep(80, 150)
+        for ch in text:
+            if is_emergency_stopped():
+                return
+            scan = win32api.VkKeyScan(ch)
+            if scan == -1:
+                log.warning("sendinput type: skipping unmappable char %r", ch)
+                continue
+            vk = scan & 0xFF
+            need_shift = bool(scan & 0x100)
+            if need_shift:
+                _send_key_event(0x10, key_up=False)
+                _jitter_sleep(10, 25)
+            _send_key_event(vk, key_up=False)
+            _jitter_sleep()
+            _send_key_event(vk, key_up=True)
+            if need_shift:
+                _jitter_sleep(10, 25)
+                _send_key_event(0x10, key_up=True)
+            _jitter_sleep(20, 50)
+
+    def hotkey(self, hwnd: int, combo: str) -> None:
+        if is_emergency_stopped():
+            return
+        modifiers, vk = parse_hotkey(combo)
+        self.key_press(hwnd, vk, modifiers)
+
+
 # ---- factory (extended in later tasks to add PostMessage / SendInput) ----
 
 _REGISTRY: dict[str, type] = {
     "loopback": LoopbackBackend,
     "postmessage": PostMessageBackend,
+    "sendinput": SendInputBackend,
 }
 
 
